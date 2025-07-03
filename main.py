@@ -63,24 +63,17 @@ def generate_warren(height, module_length, module_divisions, segment_length, num
 
 ''' ------------------------------------------------ SAP INTERFACE FUNCTIONS ------------------------------------------------ '''
 
-def initialize_model(model_path):
+def sap_initialize_model(model_path):
 
     # create API helper object
     helper = comtypes.client.CreateObject('SAP2000v1.Helper')
     helper = helper.QueryInterface(comtypes.gen.SAP2000v1.cHelper)
 
-    sap_object = helper.CreateObjectProgID("CSI.SAP2000.API.SapObject")
-    sap_object.ApplicationStart()
-    sap_model = sap_object.SapModel
-    ret = sap_model.File.OpenFile(model_path)
-    return sap_model
-    
-def refresh_model(model_path):
-    
-    helper = comtypes.client.CreateObject('SAP2000v1.Helper')
-    helper = helper.QueryInterface(comtypes.gen.SAP2000v1.cHelper)
-
     sap_object = helper.GetObject("CSI.SAP2000.API.SapObject")
+    if sap_object is None:
+        sap_object = helper.CreateObjectProgID("CSI.SAP2000.API.SapObject")
+        sap_object.ApplicationStart() 
+
     sap_model = sap_object.SapModel
     ret = sap_model.File.OpenFile(model_path)
     return sap_model
@@ -179,17 +172,17 @@ if __name__ == '__main__':
 
     live_load = 20.0 # kN/m applied to the bottom chord (deck load)
 
-    API_path = 'C:\\Users\\Nick\\source\\repos\\Capstone\\SAP Truss Script'
+    folder_path = os.getcwd()
     file_name = 'BASE.sdb'
-    path = API_path + os.sep + file_name
+    path = folder_path + os.sep + file_name
 
     # import sections from excel 
     df = pd.read_excel('./HSS_Sections.xlsx')
     hss_round = df['HSS Round'].dropna().tolist() if 'HSS Round' in df.columns else []
     hss_box = df['HSS Box'].dropna().tolist() if 'HSS Box' in df.columns else []
 
-    #initialize_model(path)
-    sap_model = refresh_model(path)
+    # initialize fresh model from BASE
+    sap_model = sap_initialize_model(path)
 
     bottom_chord_points, top_chord_points, diagonal_web_points, vertical_web_points = generate_warren(
         height, module_length, module_divisions, segment_length, num_modules)
