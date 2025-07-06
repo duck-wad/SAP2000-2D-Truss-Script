@@ -4,4 +4,4 @@
 /Models
 /test.py
 /__pycache__
-/output.xlsx
+*.xlsx

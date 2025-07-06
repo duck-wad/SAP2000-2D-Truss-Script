@@ -1,6 +1,6 @@
 import comtypes.client
-import os
-import shutil
+import math
+
 
 def sap_initialize_model(base_file_path):
     # create API helper object
@@ -104,6 +104,17 @@ def sap_set_releases(sap_model, vertical_web_frames, bottom_chord_frames, top_ch
         
         ret = sap_model.FrameObj.SetReleases(diagonal_web_frames[module_divisions*2-1+i*2*module_divisions], no_release, 
                                              moment_release, startval, endval)
+        
+def sap_central_node(sap_model, bottom_chord_frames):
+    # get the displacement of node in center of of the middlemost span (need num_spans to be odd)
+    # bottom_chord_frames has even number of frames. the frame with its right node at the point we want
+    # is at the halfway point in the array
+    index = int(len(bottom_chord_frames) / 2)
+    target = bottom_chord_frames[index]
+    point_1 = ''
+    point_2 = ''
+    point_1, point_2, ret = sap_model.FrameObj.GetPoints(target, point_1, point_2)
+    return point_1
 
 def sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor, 
                   wearing_surface_factor, concrete_deck_factor, live_UDL, 
@@ -130,27 +141,31 @@ def sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor,
         'FACTORED', 4, ['Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE', 'DECK', 'WEARING SURFACE'], 
         [dead_factor, live_factor, wearing_surface_factor, concrete_deck_factor])
     
-def sap_run_analysis(sap_model, file_path, bottom_chord_frames):
+    # also need to add a load case to calculate the natural frequency of the span
+    # apply a 1kN load to the central node, and then measure the displacement 
+    # then calculate the natural frequency as 1/2pi*sqrt(P/delta*mL) where mL is mass per unit length
+    center_node = sap_central_node(sap_model, bottom_chord_frames)
+    ret = sap_model.LoadPatterns.Add('POINT UNIT LOAD', 8, 0, True)
+    point_load = [0,0,-1,0,0,0]
+    ret = sap_model.PointObj.SetLoadForce(center_node, 'POINT UNIT LOAD', point_load)
+    ret = sap_model.LoadCases.StaticLinear.SetCase('POINT UNIT LOAD')
+    ret = sap_model.LoadCases.StaticLinear.SetLoads('POINT UNIT LOAD', 1, ['Load'], ['POINT UNIT LOAD'], [1])  
+    
+def sap_run_analysis(sap_model, file_path):
     ret = sap_model.File.Save(file_path)
     ret = sap_model.Analyze.RunAnalysis()
 
+def sap_factored_displacement(sap_model, bottom_chord_frames):
     # get the results from the 'FACTORED' load case
     ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
     ret = sap_model.Results.Setup.SetCaseSelectedForOutput('FACTORED')
 
-    # get the displacement of node in center of of the middlemost span (need num_spans to be odd)
-    # bottom_chord_frames has even number of frames. the frame with its right node at the point we want
-    # is at the halfway point in the array
-    index = int(len(bottom_chord_frames) / 2)
-    target = bottom_chord_frames[index]
-    point_1 = ''
-    point_2 = ''
-    point_1, point_2, ret = sap_model.FrameObj.GetPoints(target, point_1, point_2)
-    
-    _, _, _, _, _, _, _, _, vert_disp, _, _, _, ret = sap_model.Results.JointDispl(point_1,
+    # get the central node vertical displacement under the 'FACTORED' load case
+    center_node = sap_central_node(sap_model, bottom_chord_frames)    
+    _, _, _, _, _, _, _, _, vert_disp, _, _, _, ret = sap_model.Results.JointDispl(center_node,
                                         0, 0, [], [], [], [], [], [], [], [], [], [], []) 
-    
-    return vert_disp[0]
+    # return the abs value
+    return abs(vert_disp[0])
 
 def sap_module_mass(sap_model, num_modules):
     
@@ -166,3 +181,23 @@ def sap_module_mass(sap_model, num_modules):
     module_mass = total_mass / num_modules
     
     return module_mass
+
+def sap_natural_frequency(sap_model, module_mass, bottom_chord_frames):
+    # get the results from the 'POINT UNIT LOAD' load case
+    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('POINT UNIT LOAD')
+
+    # calculate the natural frequency
+    # get the displacement of center node under the 'POINT UNIT LOAD' case
+    # calculate fn as 1/2pi*sqrt(P/(delta*mL)) where mL is mass per unit length
+    # mass per unit length would be 2*module_mass / 
+    center_node = sap_central_node(sap_model, bottom_chord_frames)   
+    _, _, _, _, _, _, _, _, disp, _, _, _, ret = sap_model.Results.JointDispl(center_node,
+                                        0, 0, [], [], [], [], [], [], [], [], [], [], []) 
+    disp = disp[0]*-1
+    
+    # get the module mass per unit length
+    span_mass = module_mass * 2
+
+    f_n = (1 / (2 * math.pi)) * math.sqrt(1000 / (disp * span_mass))
+    return f_n
