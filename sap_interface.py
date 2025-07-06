@@ -1,7 +1,8 @@
 import comtypes.client
+import os
+import shutil
 
-def sap_initialize_model(model_path):
-
+def sap_initialize_model(base_file_path):
     # create API helper object
     helper = comtypes.client.CreateObject('SAP2000v1.Helper')
     helper = helper.QueryInterface(comtypes.gen.SAP2000v1.cHelper)
@@ -12,11 +13,11 @@ def sap_initialize_model(model_path):
         sap_object.ApplicationStart() 
 
     sap_model = sap_object.SapModel
-    ret = sap_model.File.OpenFile(model_path)
+    ret = sap_model.File.OpenFile(base_file_path)
     return sap_model
 
 def sap_create_frame(sap_model, bottom_chord_points, top_chord_points, diagonal_web_points, vertical_web_points,
-                     bottom_chord_section, top_chord_section, diagonal_web_section, vertical_web_section):
+                     bottom_chord_section, top_chord_section, web_section):
     
     # generate bottom chord
     bottom_chord_frames = []
@@ -34,11 +35,11 @@ def sap_create_frame(sap_model, bottom_chord_points, top_chord_points, diagonal_
     # generate diagonal webs
     for i in range(len(diagonal_web_points)-1):
         diagonal_web_frames.append(sap_model.FrameObj.AddByCoord(*diagonal_web_points[i], 
-                                                                 *diagonal_web_points[i+1], 'foo', diagonal_web_section)[0])
+                                                                 *diagonal_web_points[i+1], 'foo', web_section)[0])
     # generate vertical webs
     for i in range(int(len(vertical_web_points)/2)):
         vertical_web_frames.append(sap_model.FrameObj.AddByCoord(*vertical_web_points[i*2], 
-                                                                 *vertical_web_points[i*2+1], 'foo', vertical_web_section)[0])
+                                                                 *vertical_web_points[i*2+1], 'foo', web_section)[0])
 
     return bottom_chord_frames, top_chord_frames, diagonal_web_frames, vertical_web_frames
 
@@ -64,6 +65,12 @@ def sap_set_restraints(sap_model, vertical_web_frames, num_spans):
     for i in range(num_spans+1):
         point_1, point_2, ret = sap_model.FrameObj.GetPoints(vertical_web_frames[i*2], point_1, point_2)
         ret = sap_model.PointObj.SetRestraint(point_1, pin_restraint)
+
+    # should also pin the corners of the edge modules
+    point_1, point_2, ret = sap_model.FrameObj.GetPoints(vertical_web_frames[0], point_1, point_2)
+    ret = sap_model.PointObj.SetRestraint(point_2, pin_restraint)
+    point_1, point_2, ret = sap_model.FrameObj.GetPoints(vertical_web_frames[-1], point_1, point_2)
+    ret = sap_model.PointObj.SetRestraint(point_2, pin_restraint)
 
 def sap_set_releases(sap_model, vertical_web_frames, bottom_chord_frames, top_chord_frames, 
                      diagonal_web_frames, num_modules, module_divisions):
@@ -122,3 +129,40 @@ def sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor,
     ret = sap_model.LoadCases.StaticLinear.SetLoads(
         'FACTORED', 4, ['Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE', 'DECK', 'WEARING SURFACE'], 
         [dead_factor, live_factor, wearing_surface_factor, concrete_deck_factor])
+    
+def sap_run_analysis(sap_model, file_path, bottom_chord_frames):
+    ret = sap_model.File.Save(file_path)
+    ret = sap_model.Analyze.RunAnalysis()
+
+    # get the results from the 'FACTORED' load case
+    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('FACTORED')
+
+    # get the displacement of node in center of of the middlemost span (need num_spans to be odd)
+    # bottom_chord_frames has even number of frames. the frame with its right node at the point we want
+    # is at the halfway point in the array
+    index = int(len(bottom_chord_frames) / 2)
+    target = bottom_chord_frames[index]
+    point_1 = ''
+    point_2 = ''
+    point_1, point_2, ret = sap_model.FrameObj.GetPoints(target, point_1, point_2)
+    
+    _, _, _, _, _, _, _, _, vert_disp, _, _, _, ret = sap_model.Results.JointDispl(point_1,
+                                        0, 0, [], [], [], [], [], [], [], [], [], [], []) 
+    
+    return vert_disp[0]
+
+def sap_module_mass(sap_model, num_modules):
+    
+    # get the results from the 'DEAD' load case
+    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('DEAD')
+
+    _, _, _, _, _, _, reaction, _, _, _, _, _, _, ret = sap_model.Results.BaseReact(
+        0, [], [], [], [], [], [], [], [], [], 0, 0, 0)
+    
+    # convert kN to kg
+    total_mass = reaction[0] / 9.81 * 1000
+    module_mass = total_mass / num_modules
+    
+    return module_mass

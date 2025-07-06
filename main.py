@@ -13,7 +13,9 @@ if __name__ == '__main__':
     module_divisions = 4 # applies to the bottom chord
     segment_length = module_length / module_divisions
     # each span contains 2 modules, so there will be num_spans x 2 modules
-    num_spans = 2
+    # num_spans should be an odd number
+    num_spans = 5
+    assert num_spans % 2 != 0
     num_modules = 2*num_spans
 
     ''' ------------------------ DEFINE LOADS ------------------------ '''
@@ -40,7 +42,7 @@ if __name__ == '__main__':
     ''' ------------------------ IMPORT SECTIONS ------------------------ '''
 
     # import sections from excel 
-    df = pd.read_excel('./HSS_Sections.xlsx')
+    df = pd.read_excel('./sections.xlsx')
     hss_round = df['HSS Round'].dropna().tolist() if 'HSS Round' in df.columns else []
     hss_box = df['HSS Box'].dropna().tolist() if 'HSS Box' in df.columns else []
 
@@ -51,25 +53,28 @@ if __name__ == '__main__':
 
     ''' ------------------------ INITIALIZE MODEL ------------------------ '''
 
-    folder_path = os.getcwd()
-    file_name = 'BASE.sdb'
-    path = folder_path + os.sep + file_name
+    root_path = os.getcwd()
+    base_file_path = root_path + '/BASE.sdb'
+    os.makedirs('./models', exist_ok=True)
+    model_path = root_path + '/models/MODEL.sdb'
 
-    # initialize fresh model from BASE
-    sap_model = sap_initialize_model(path)
+    # initialize fresh model from BASE in root folder
+    sap_model = sap_initialize_model(base_file_path)
+
+    # initialize the list of results for each section combination
+    results = []
 
     # TEMPORARY SET SECTIONS
     bottom_chord_section = hss_round[10]
     top_chord_section = hss_round[10]
-    diagonal_web_section = hss_round[10]
-    vertical_web_section = hss_round[10]
+    web_section = hss_round[10]
 
     ''' ------------------------ CREATE SAP MODEL ------------------------ '''
 
     # generate frames
     bottom_chord_frames, top_chord_frames, diagonal_web_frames, vertical_web_frames = sap_create_frame(
         sap_model, bottom_chord_points, top_chord_points, diagonal_web_points, vertical_web_points,
-        bottom_chord_section, top_chord_section, diagonal_web_section, vertical_web_section)
+        bottom_chord_section, top_chord_section, web_section)
 
     # set the restraints
     sap_set_restraints(sap_model, vertical_web_frames, num_spans)
@@ -82,5 +87,25 @@ if __name__ == '__main__':
     sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor, 
                   wearing_surface_factor, concrete_deck_factor, live_UDL, 
                   wearing_surface_UDL, concrete_deck_UDL)
-
     
+    ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------------ '''
+    
+    # save the file to a new file in the models folder (so don't override the BASE file)
+    # return the vertical displacement of the central node
+    vert_disp = sap_run_analysis(sap_model, model_path, bottom_chord_frames)
+    print(vert_disp)
+    # get the reaction output from dead case and divide by num_modules
+    module_mass = sap_module_mass(sap_model, num_modules)
+    print(module_mass)
+
+    results.append({
+        'Bottom chord': bottom_chord_section,
+        'Top chord': top_chord_section,
+        'Web members': web_section,
+        'Max vertical displacement (m)': vert_disp,
+        'Module mass (kg)': module_mass
+    })
+
+    ''' ------------------------ EXPORT RESULTS ------------------------ '''
+    df = pd.DataFrame(results)
+    df.to_excel('output.xlsx', index=False)
