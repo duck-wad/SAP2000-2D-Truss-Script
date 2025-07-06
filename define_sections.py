@@ -122,4 +122,5 @@ def create_section_combinations():
     # get combinations for top and bottom chord box and round web
     box_round_combinations = valid_combinations(top_chord_box, bottom_chord_box, web_round)
 
-    return [round_combinations, box_combinations, box_round_combinations]
+    #return [round_combinations, box_combinations, box_round_combinations]
+    return [round_combinations[0:5], box_combinations[0:5], box_round_combinations[0:5]]

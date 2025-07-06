@@ -1,16 +1,22 @@
 import comtypes.client
 import math
 
-
-def sap_initialize_model(base_file_path):
+def sap_open():
     # create API helper object
     helper = comtypes.client.CreateObject('SAP2000v1.Helper')
     helper = helper.QueryInterface(comtypes.gen.SAP2000v1.cHelper)
-
     sap_object = helper.GetObject("CSI.SAP2000.API.SapObject")
     if sap_object is None:
         sap_object = helper.CreateObjectProgID("CSI.SAP2000.API.SapObject")
         sap_object.ApplicationStart() 
+
+    return sap_object
+
+def sap_close(sap_object):
+    ret = sap_object.ApplicationExit(False)
+    sap_object = None
+
+def sap_initialize_model(base_file_path, sap_object):
 
     sap_model = sap_object.SapModel
     ret = sap_model.File.OpenFile(base_file_path)
@@ -150,6 +156,9 @@ def sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor,
     ret = sap_model.PointObj.SetLoadForce(center_node, 'POINT UNIT LOAD', point_load)
     ret = sap_model.LoadCases.StaticLinear.SetCase('POINT UNIT LOAD')
     ret = sap_model.LoadCases.StaticLinear.SetLoads('POINT UNIT LOAD', 1, ['Load'], ['POINT UNIT LOAD'], [1])  
+
+    # for modal analysis, increase the number of modes (eigen) to 40
+    ret = sap_model.LoadCases.ModalEigen.SetNumberModes('MODAL', 40, 20)
     
 def sap_run_analysis(sap_model, file_path):
     ret = sap_model.File.Save(file_path)
@@ -182,7 +191,7 @@ def sap_module_mass(sap_model, num_modules):
     
     return module_mass
 
-def sap_natural_frequency(sap_model, module_mass, bottom_chord_frames):
+""" def sap_natural_frequency(sap_model, module_mass, bottom_chord_frames, pedestrian_density):
     # get the results from the 'POINT UNIT LOAD' load case
     ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
     ret = sap_model.Results.Setup.SetCaseSelectedForOutput('POINT UNIT LOAD')
@@ -200,4 +209,48 @@ def sap_natural_frequency(sap_model, module_mass, bottom_chord_frames):
     span_mass = module_mass * 2
 
     f_n = (1 / (2 * math.pi)) * math.sqrt(1000 / (disp * span_mass))
-    return f_n
+
+    # calculate forcing frequency of pedestrians (Hz)
+    f_s = 0.099 * pedestrian_density**2 - 0.644*pedestrian_density + 2.188
+
+    # calculate resonating harmonic
+    m = f_n / f_s
+
+    return f_n, m """
+
+def sap_natural_frequency(sap_model, pedestrian_density):
+    # get results from 'MODAL' load case
+    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('MODAL')
+    Uz = []
+    sumUz = []
+    period = []
+    # get the list of modal participating mass ratios for each mode. we want to find the mode that has highest 
+    # participating ratio in the Z (vertical) direction
+    _, _, _, _, period, _, _, Uz, _, _, sumUz, _, _, _, _, _, _, ret = sap_model.Results.ModalParticipatingMassRatios(
+        0, [], [], [], period, [], [], [], [], [], [], [], [], [], [], [], []
+    )
+    # get the mode that has the highest Uz
+    max_Uz = max(Uz)
+    mode_index = Uz.index(max_Uz)
+    natural_period = period[mode_index]
+    natural_frequency = 1 / natural_period
+    
+    # calculate forcing frequency of pedestrians (Hz)
+    forcing_frequency = 0.099 * pedestrian_density**2 - 0.644*pedestrian_density + 2.188
+
+    # calculate resonating harmonic
+    m = natural_frequency / forcing_frequency
+
+    return natural_frequency, m
+
+def sap_steel_design(sap_model):
+    ret = sap_model.DesignSteel.StartDesign()
+    num_failed = 0
+    _, num_failed, _, _, ret = sap_model.DesignSteel.VerifyPassed(0, num_failed, 0, [])
+
+    passed = True
+    if num_failed != 0: 
+        passed = False
+
+    return passed
