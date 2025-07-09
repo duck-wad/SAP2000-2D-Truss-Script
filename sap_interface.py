@@ -1,5 +1,4 @@
 import comtypes.client
-import math
 
 def sap_open():
     # create API helper object
@@ -122,59 +121,74 @@ def sap_central_node(sap_model, bottom_chord_frames):
     point_1, point_2, ret = sap_model.FrameObj.GetPoints(target, point_1, point_2)
     return point_1
 
-def sap_set_loads(sap_model, bottom_chord_frames, dead_factor, live_factor, 
-                  wearing_surface_factor, concrete_deck_factor, live_UDL, 
-                  wearing_surface_UDL, concrete_deck_UDL):
+def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
+                  wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL_vertical, 
+                  live_UDL_horizontal, wearing_surface_UDL, concrete_deck_UDL, snow_UDL):
     # define the load patterns (dead and live)
     # (case name, type (1=dead, 8=other), self weight multiplier, add linear static load case)
     ret = sap_model.LoadPatterns.Add('DEAD', 1, 1, True)
-    ret = sap_model.LoadPatterns.Add('LIVE', 8, 0, True)
+    ret = sap_model.LoadPatterns.Add('LIVE_VERTICAL', 8, 0, True)
+    ret = sap_model.LoadPatterns.Add('LIVE_HORIZONTAL', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('DECK', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('WEARING SURFACE', 8, 0, True)
+    ret = sap_model.LoadPatterns.Add('SNOW', 8, 0, True)
 
     for i in range(len(bottom_chord_frames)):
         # apply live, deck, and asphalt as UDL to bottom chord
         # (name, load case, type (1 is force per unit length, 2 is moment per unit length), 
         # integer indicating direction (10 is gravity dir), dist1, dist2, val1, val2)
-        ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'LIVE', 1, 10, 0, 1, 
-                                                    live_UDL, live_UDL, RelDist = True)
+        ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'LIVE_VERTICAL', 1, 10, 0, 1, 
+                                                    live_UDL_vertical, live_UDL_vertical, RelDist = True)
+        # horizontal load is dir y (5)
+        ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'LIVE_HORIZONTAL', 1, 5, 0, 1, 
+                                                    live_UDL_horizontal, live_UDL_horizontal, RelDist = True)
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'DECK', 1, 10, 0, 1, 
                                                     concrete_deck_UDL, concrete_deck_UDL, RelDist = True)
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'WEARING SURFACE', 1, 10, 0, 1, 
                                                     wearing_surface_UDL, wearing_surface_UDL, RelDist = True)
-    ret = sap_model.LoadCases.StaticLinear.SetCase('FACTORED')
+    # snow load applies to top chord
+    for i in range(len(top_chord_frames)):
+        ret = sap_model.FrameObj.SetLoadDistributed(top_chord_frames[i], 'SNOW', 1, 10, 0, 1, 
+                                                    snow_UDL, snow_UDL, RelDist = True)
+
+    ret = sap_model.LoadCases.StaticLinear.SetCase('ULS_1')
     ret = sap_model.LoadCases.StaticLinear.SetLoads(
-        'FACTORED', 4, ['Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE', 'DECK', 'WEARING SURFACE'], 
-        [dead_factor, live_factor, wearing_surface_factor, concrete_deck_factor])
+        'ULS_1', 5, ['Load', 'Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE_VERTICAL', 
+                                                               'LIVE_HORIZONTAL', 'DECK', 'WEARING SURFACE'], 
+        [dead_factor, live_factor, live_factor, wearing_surface_factor, concrete_deck_factor])
     
-    # also need to add a load case to calculate the natural frequency of the span
-    # apply a 1kN load to the central node, and then measure the displacement 
-    # then calculate the natural frequency as 1/2pi*sqrt(P/delta*mL) where mL is mass per unit length
-    center_node = sap_central_node(sap_model, bottom_chord_frames)
-    ret = sap_model.LoadPatterns.Add('POINT UNIT LOAD', 8, 0, True)
-    point_load = [0,0,-1,0,0,0]
-    ret = sap_model.PointObj.SetLoadForce(center_node, 'POINT UNIT LOAD', point_load)
-    ret = sap_model.LoadCases.StaticLinear.SetCase('POINT UNIT LOAD')
-    ret = sap_model.LoadCases.StaticLinear.SetLoads('POINT UNIT LOAD', 1, ['Load'], ['POINT UNIT LOAD'], [1])  
+    ret = sap_model.LoadCases.StaticLinear.SetCase('ULS_5')
+    ret = sap_model.LoadCases.StaticLinear.SetLoads(
+        'ULS_5', 4, ['Load', 'Load', 'Load', 'Load'], ['DEAD', 'SNOW', 'DECK', 'WEARING SURFACE'], 
+        [dead_factor, snow_factor, wearing_surface_factor, concrete_deck_factor])
 
     # for modal analysis, increase the number of modes (eigen) to 40
     ret = sap_model.LoadCases.ModalEigen.SetNumberModes('MODAL', 40, 20)
+
+    # return list of load cases for later reference
+    return ['ULS_1', 'ULS_5']
     
 def sap_run_analysis(sap_model, file_path):
     ret = sap_model.File.Save(file_path)
     ret = sap_model.Analyze.RunAnalysis()
 
-def sap_factored_displacement(sap_model, bottom_chord_frames):
-    # get the results from the 'FACTORED' load case
-    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
-    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('FACTORED')
+def sap_displacement(sap_model, load_cases, bottom_chord_frames):
 
-    # get the central node vertical displacement under the 'FACTORED' load case
-    center_node = sap_central_node(sap_model, bottom_chord_frames)    
-    _, _, _, _, _, _, _, _, vert_disp, _, _, _, ret = sap_model.Results.JointDispl(center_node,
-                                        0, 0, [], [], [], [], [], [], [], [], [], [], []) 
-    # return the abs value
-    return abs(vert_disp[0])
+    displacements = []
+
+    for case in load_cases:
+        # get the results from the 'ULS_1' load case
+        ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+        ret = sap_model.Results.Setup.SetCaseSelectedForOutput(case)
+
+        # get the central node vertical displacement
+        center_node = sap_central_node(sap_model, bottom_chord_frames)    
+        _, _, _, _, _, _, _, _, temp, _, _, _, ret = sap_model.Results.JointDispl(center_node,
+                                            0, 0, [], [], [], [], [], [], [], [], [], [], []) 
+        # return absolute value
+        displacements.append(abs(temp[0]))
+
+    return displacements
 
 def sap_module_mass(sap_model, num_modules):
     
@@ -190,33 +204,6 @@ def sap_module_mass(sap_model, num_modules):
     module_mass = total_mass / num_modules
     
     return module_mass
-
-""" def sap_natural_frequency(sap_model, module_mass, bottom_chord_frames, pedestrian_density):
-    # get the results from the 'POINT UNIT LOAD' load case
-    ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
-    ret = sap_model.Results.Setup.SetCaseSelectedForOutput('POINT UNIT LOAD')
-
-    # calculate the natural frequency
-    # get the displacement of center node under the 'POINT UNIT LOAD' case
-    # calculate fn as 1/2pi*sqrt(P/(delta*mL)) where mL is mass per unit length
-    # mass per unit length would be 2*module_mass / 
-    center_node = sap_central_node(sap_model, bottom_chord_frames)   
-    _, _, _, _, _, _, _, _, disp, _, _, _, ret = sap_model.Results.JointDispl(center_node,
-                                        0, 0, [], [], [], [], [], [], [], [], [], [], []) 
-    disp = disp[0]*-1
-    
-    # get the module mass per unit length
-    span_mass = module_mass * 2
-
-    f_n = (1 / (2 * math.pi)) * math.sqrt(1000 / (disp * span_mass))
-
-    # calculate forcing frequency of pedestrians (Hz)
-    f_s = 0.099 * pedestrian_density**2 - 0.644*pedestrian_density + 2.188
-
-    # calculate resonating harmonic
-    m = f_n / f_s
-
-    return f_n, m """
 
 def sap_natural_frequency(sap_model, pedestrian_density):
     # get results from 'MODAL' load case
@@ -244,13 +231,22 @@ def sap_natural_frequency(sap_model, pedestrian_density):
 
     return natural_frequency, m
 
-def sap_steel_design(sap_model):
-    ret = sap_model.DesignSteel.StartDesign()
-    num_failed = 0
-    _, num_failed, _, _, ret = sap_model.DesignSteel.VerifyPassed(0, num_failed, 0, [])
+def sap_steel_design(sap_model, load_cases):
 
-    passed = True
-    if num_failed != 0: 
-        passed = False
+    passed = []
 
+    for case in load_cases:
+        ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
+        ret = sap_model.Results.Setup.SetCaseSelectedForOutput(case)
+
+        ret = sap_model.DesignSteel.StartDesign()
+        num_failed = 0
+        _, num_failed, _, _, ret = sap_model.DesignSteel.VerifyPassed(0, num_failed, 0, [])
+
+        if num_failed != 0: 
+            passed.append(False)
+        else:
+            passed.append(True)
+        
     return passed
+

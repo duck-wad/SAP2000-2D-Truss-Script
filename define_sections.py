@@ -1,5 +1,7 @@
 import xml.etree.ElementTree as ET
 import pandas as pd
+import os
+from openpyxl import load_workbook, Workbook
 
 def load_xml():
     # load xml file from SAP2000 installation folder
@@ -123,4 +125,17 @@ def create_section_combinations():
     box_round_combinations = valid_combinations(top_chord_box, bottom_chord_box, web_round)
 
     #return [round_combinations, box_combinations, box_round_combinations]
-    return [round_combinations[0:5], box_combinations[0:5], box_round_combinations[0:5]]
+    return [round_combinations[0:2], box_combinations[0:2], box_round_combinations[0:2]]
+
+def write_to_excel(results, path, sheet, first_write=False):
+
+    df = pd.DataFrame(results)
+
+    if first_write:
+        with pd.ExcelWriter(path, mode='w') as writer:
+                df.to_excel(writer, sheet_name=sheet, index=False)
+
+    else:
+        with pd.ExcelWriter(path, mode='a', if_sheet_exists='replace',) as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False)
+
