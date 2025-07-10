@@ -123,7 +123,7 @@ def sap_central_node(sap_model, bottom_chord_frames):
 
 def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
                   wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL_vertical, 
-                  live_UDL_horizontal, wearing_surface_UDL, concrete_deck_UDL, snow_UDL):
+                  live_UDL_horizontal, wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL):
     # define the load patterns (dead and live)
     # (case name, type (1=dead, 8=other), self weight multiplier, add linear static load case)
     ret = sap_model.LoadPatterns.Add('DEAD', 1, 1, True)
@@ -132,6 +132,7 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
     ret = sap_model.LoadPatterns.Add('DECK', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('WEARING SURFACE', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('SNOW', 8, 0, True)
+    ret = sap_model.LoadPatterns.Add('ROOF', 8, 0, True)
 
     for i in range(len(bottom_chord_frames)):
         # apply live, deck, and asphalt as UDL to bottom chord
@@ -147,20 +148,23 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'WEARING SURFACE', 1, 10, 0, 1, 
                                                     wearing_surface_UDL, wearing_surface_UDL, RelDist = True)
     # snow load applies to top chord
+    # roof load also applies to top
     for i in range(len(top_chord_frames)):
         ret = sap_model.FrameObj.SetLoadDistributed(top_chord_frames[i], 'SNOW', 1, 10, 0, 1, 
                                                     snow_UDL, snow_UDL, RelDist = True)
+        ret = sap_model.FrameObj.SetLoadDistributed(top_chord_frames[i], 'ROOF', 1, 10, 0, 1,
+                                                    roof_UDL, roof_UDL, RelDist = True)
 
     ret = sap_model.LoadCases.StaticLinear.SetCase('ULS_1')
     ret = sap_model.LoadCases.StaticLinear.SetLoads(
-        'ULS_1', 5, ['Load', 'Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE_VERTICAL', 
-                                                               'LIVE_HORIZONTAL', 'DECK', 'WEARING SURFACE'], 
-        [dead_factor, live_factor, live_factor, wearing_surface_factor, concrete_deck_factor])
+        'ULS_1', 6, ['Load', 'Load', 'Load', 'Load', 'Load', 'Load'], ['DEAD', 'LIVE_VERTICAL', 
+                                                               'LIVE_HORIZONTAL', 'DECK', 'WEARING SURFACE', 'ROOF'], 
+        [dead_factor, live_factor, live_factor, wearing_surface_factor, concrete_deck_factor, dead_factor])
     
     ret = sap_model.LoadCases.StaticLinear.SetCase('ULS_5')
     ret = sap_model.LoadCases.StaticLinear.SetLoads(
-        'ULS_5', 4, ['Load', 'Load', 'Load', 'Load'], ['DEAD', 'SNOW', 'DECK', 'WEARING SURFACE'], 
-        [dead_factor, snow_factor, wearing_surface_factor, concrete_deck_factor])
+        'ULS_5', 5, ['Load', 'Load', 'Load', 'Load', 'Load'], ['DEAD', 'SNOW', 'DECK', 'WEARING SURFACE', 'ROOF'], 
+        [dead_factor, snow_factor, wearing_surface_factor, concrete_deck_factor, dead_factor])
 
     # for modal analysis, increase the number of modes (eigen) to 40
     ret = sap_model.LoadCases.ModalEigen.SetNumberModes('MODAL', 40, 20)

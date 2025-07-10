@@ -1,5 +1,4 @@
 import os
-import pandas as pd
 from tqdm import tqdm
 
 from sap_interface import *
@@ -29,10 +28,10 @@ if __name__ == '__main__':
     deck_pressure = 1.85 # kPa (Simon calculation)
     asphalt_thickness = 0.004 # 4mm
     asphalt_density = 21 # kN/m3
-    pedestrian_pressure = 3.86 # kPa
+    pedestrian_pressure = 3.86 # kPa (Simon calculation)
     pedestrian_density = 1.5 # p/m2
     barrier_load = 1.2 # kN/m
-    snow_pressure = 1.3 # kPa
+    snow_pressure = 1.3 # kPa (Simon calculation)
     trib_area = deck_width / 2.0
 
     # load factors
@@ -48,6 +47,7 @@ if __name__ == '__main__':
     wearing_surface_UDL = asphalt_density * asphalt_thickness * trib_area
     concrete_deck_UDL = deck_pressure * trib_area
     snow_UDL = snow_pressure * trib_area
+    roof_UDL = 0.5 # kN/m (Simon calculation)
 
     ''' ------------------------ INITIALIZE MODEL ------------------------ '''
     
@@ -106,7 +106,7 @@ if __name__ == '__main__':
             # set the load case, apply deck load to bottom chord
             load_cases = sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
                         wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL_vertical, live_UDL_horizontal,
-                        wearing_surface_UDL, concrete_deck_UDL, snow_UDL)
+                        wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL)
             
             ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------------ '''
             
@@ -149,6 +149,7 @@ if __name__ == '__main__':
             # write result to excel
             if combo_index % 10 == 0:
                 write_to_excel(results, results_path, sheet_name, first_write)
+                tqdm.write("Successfully updated output file.")
                 first_write = False
 
             sap_model = None
