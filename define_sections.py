@@ -47,21 +47,27 @@ def load_xml():
 
     return hss_round, hss_box
 
-def filter_HSS_sections(sections, min_depth, min_thick, max_depth, max_thick):
+def filter_HSS_sections(sections, min_depth, min_thick, max_depth, max_thick, asym = False):
     filtered_sections = []
     for section in sections:
         # name is in format HS###X## (round) and HS###X###X## (box)
         # split section name into before and after 'X'
         # depth is always the first dim and thickness always the last dim
-        # don't need to filter based on width
         parts = section.split('X')
         # get diameter as everything after 'HS' and before 'X', and convert to int
         depth = int(parts[0][2:])
         # get numbers after 'X' and convert to float
         thick = float(parts[-1])
+        # get width if applicable
+        width = depth
+        if len(parts) == 3:
+            width = int(parts[1])
 
         if depth >= min_depth and thick >= min_thick and depth <= max_depth and thick <= max_thick:
-            filtered_sections.append(section)
+            if asym == True and width != depth:
+                pass
+            else:
+                filtered_sections.append(section)
 
     return filtered_sections
 
@@ -84,21 +90,17 @@ def valid_combinations(top_sections, bottom_sections, web_sections):
                         combinations.append([top, bottom, web])
     return combinations
 
+# we are limiting bottom and top chord to be box only for connection purposes
+# top chord > bottom chord > web
+# for box limit to square section no rectangle (for now to limit combinations)
 def create_section_combinations():
 
     round, box = load_xml()
 
     ''' ------------------------ FILTER ROUND SECTIONS ------------------------ '''
-    # top chord is largest because under compression. limit size to be above 219mm diam. and 8mm thick
-    top_chord_round = filter_HSS_sections(round, 200, 8, 500, 20)
-    # bottom chord is smaller because under tension
-    # limit diam to be between 150-350 and thickness 6.4-13
-    bottom_chord_round = filter_HSS_sections(round, 150, 6.4, 350, 13)
-    # web is smallest, limit diam between 100-250 and thickness 4-10
-    web_round = filter_HSS_sections(round, 100, 4, 250, 10)
-
-    # [top, bottom, web]
-    round_combinations = valid_combinations(top_chord_round, bottom_chord_round, web_round)
+    # web is smaller than bottom chord. don't specify a min or max diameter, that will be taken care of in 
+    # the valid_combinations function. limit thickness 7.9-9.5
+    web_round = filter_HSS_sections(round, 0, 7.9, 500, 9.5)
 
     ''' ------------------------ FILTER BOX SECTIONS ------------------------ '''
 
@@ -112,20 +114,21 @@ def create_section_combinations():
     # reverse list
     box.reverse()
     
-    # limit top chord to be depth 250-356 and thickness 9-16
-    top_chord_box = filter_HSS_sections(box, 250, 9, 356, 16)
-    # limit bottom chord depth 200-305 and thickness 6-13
-    bottom_chord_box = filter_HSS_sections(box, 200, 6, 305, 13)
-    # limit web depth 150-254 and thickness 4.8-13
-    web_box = filter_HSS_sections(box, 150, 4.8, 254, 13)
+    # limit top chord to be depth 200+ and thickness 7.9-9.5
+    top_chord_box = filter_HSS_sections(box, 200, 7.9, 356, 9.5)
+    # limit bottom chord depth no bottom limit, 305 top, 7.9-9.5
+    bottom_chord_box = filter_HSS_sections(box, 0, 7.9, 305, 9.5)
+    # limit web depth no bottom limit, top limit 203
+    # limit the web to be only square sections
+    web_box = filter_HSS_sections(box, 0, 7.9, 203, 9.5, asym=True)
 
-    box_combinations = valid_combinations(top_chord_box, bottom_chord_box, web_box)
+    ''' ------------------------ CREATE COMBINATIONS ------------------------ '''
+    
+    # [top, bottom, web]
+    box_box_box = valid_combinations(top_chord_box, bottom_chord_box, web_box)
+    box_box_round = valid_combinations(top_chord_box, bottom_chord_box, web_round)   
 
-    # get combinations for top and bottom chord box and round web
-    box_round_combinations = valid_combinations(top_chord_box, bottom_chord_box, web_round)
-
-    #return [box_combinations[601:-1], box_round_combinations]
-    return [round_combinations, box_combinations, box_round_combinations]
+    return [box_box_box, box_box_round]
 
 def write_to_excel(results, path, sheet, first_write=False):
 
@@ -138,4 +141,3 @@ def write_to_excel(results, path, sheet, first_write=False):
     else:
         with pd.ExcelWriter(path, mode='a', if_sheet_exists='replace',) as writer:
             df.to_excel(writer, sheet_name=sheet, index=False)
-

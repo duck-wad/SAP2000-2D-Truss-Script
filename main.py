@@ -42,8 +42,8 @@ if __name__ == '__main__':
     snow_factor = 1.5
 
     # compute UDLs
-    live_UDL_vertical = barrier_load + trib_area * pedestrian_pressure
-    live_UDL_horizontal = barrier_load
+    live_UDL = trib_area * pedestrian_pressure
+    barrier_UDL = barrier_load
     wearing_surface_UDL = asphalt_density * asphalt_thickness * trib_area
     concrete_deck_UDL = deck_pressure * trib_area
     snow_UDL = snow_pressure * trib_area
@@ -74,11 +74,12 @@ if __name__ == '__main__':
     results_path = root_path + os.sep + results_file
     if os.path.exists(results_path):
         os.remove(results_path)
+    sheet_names = ['Box Box Box', 'Box Box Round']
 
     first_write = True
     for index, combination_type in enumerate(section_combinations):
         results = []
-        sheet_name = f'Sheet {index+1}'
+        sheet_name = sheet_names[index]
 
         for combo_index, combination in enumerate(tqdm(combination_type)):
 
@@ -104,54 +105,60 @@ if __name__ == '__main__':
                             diagonal_web_frames, num_modules, module_divisions)
 
             # set the load case, apply deck load to bottom chord
-            load_cases = sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
-                        wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL_vertical, live_UDL_horizontal,
+            sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
+                        wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL, barrier_UDL,
                         wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL)
             
-            ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------------ '''
+            ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------
+            
+            ------ '''
             
             # save the file to a new file in the models folder (so don't override the BASE file)
             sap_run_analysis(sap_model, model_path)
 
-            displacements = sap_displacement(sap_model, load_cases, bottom_chord_frames)
+            deflection, deflection_percentage = sap_deflection(sap_model, bottom_chord_frames, span_length)
             # get the reaction output from dead case and divide by num_modules
             module_mass = sap_module_mass(sap_model, num_modules)
 
-            #natural_frequency, resonating_harmonic = sap_natural_frequency(sap_model, module_mass, bottom_chord_frames, pedestrian_density)
-            natural_frequency, resonating_harmonic = sap_natural_frequency(sap_model, pedestrian_density)
-
-            # verify frames pass steel design check
-            passed = sap_steel_design(sap_model, load_cases)
+            natural_frequency, in_crit_range, natural_frequency_occupied, resonating_harmonic, resonating_harmonic_occupied = sap_natural_frequency(
+                sap_model, pedestrian_density, concrete_deck_UDL, live_UDL)
+            # verify frames pass steel design check, and get list of sections that fail if ULS does not pass
+            passed, failed_section_names = sap_steel_design(sap_model)
 
             results.append({
                 'Top chord': top_chord_section,
                 'Bottom chord': bottom_chord_section,
                 'Web members': web_section,
-                'Max vertical displacement for ULS1 - Live (m)': displacements[0],
-                'Max vertical displacement for ULS5 - Snow (m)': displacements[1],
+                'Max vertical deflection for SLS (m)': deflection,
+                'Percentage of deflection limit for SLS (%)': deflection_percentage,
                 'Module mass (kg)': module_mass,
                 'Natural frequency (Hz)': natural_frequency,
+                'Natural frequency in critical range': in_crit_range,
+                'Natural frequency occupied (Hz)': natural_frequency_occupied,
                 'Resonating harmonic': resonating_harmonic,
-                'Passed steel design check for ULS1 - Live': passed[0],
-                'Passed steel design check for ULS5 - Snow': passed[1],
+                'Resonating harmonic occupied': resonating_harmonic_occupied,
+                'Passed steel design check for ULS': passed,
+                'Failed section': failed_section_names
             })
 
             # log results to console
             tqdm.write(f'Top chord section: {top_chord_section}, Bottom chord section: {bottom_chord_section}, Web member section: {web_section}')
-            tqdm.write(f'Displacement of central node for ULS1 - Live (mm): {displacements[0] * 1000}')
-            tqdm.write(f'Displacement of central node for ULS5 - Snow (mm): {displacements[1] * 1000}')
-            tqdm.write(f'Mass of single module (kg): {module_mass}')
-            tqdm.write(f'Natural frequency of span (Hz): {natural_frequency}')
-            tqdm.write(f'Resonating harmonic: {resonating_harmonic}')
-            tqdm.write(f'Passed steel design check for ULS1 - Live: {passed[0]}')
-            tqdm.write(f'Passed steel design check for ULS5 - Snow: {passed[1]}')
-
+            tqdm.write(f'Deflection of central node for SLS (mm): {round(deflection * 1000, 4)}')
+            tqdm.write(f'Percentage of deflection limit for SLS (%): {round(deflection_percentage)}')
+            tqdm.write(f'Mass of single module (kg): {round(module_mass, 4)}')
+            tqdm.write(f'Natural frequency of span (Hz): {round(natural_frequency, 4)}')
+            tqdm.write(f'Natural frequency in critical range?: {in_crit_range}')
+            tqdm.write(f'Natural frequency of span occupied (Hz): {round(natural_frequency_occupied, 4)}')
+            tqdm.write(f'Resonating harmonic of span: {round(resonating_harmonic, 4)}')
+            tqdm.write(f'Resonating harmonic of span occupied: {round(resonating_harmonic_occupied, 4)}')
+            tqdm.write(f'Passed steel design check for ULS: {passed}')
+            tqdm.write(f'Failed section: {failed_section_names}')
             # write result to excel
             if combo_index % 10 == 0:
                 write_to_excel(results, results_path, sheet_name, first_write)
                 tqdm.write("Successfully updated output file.")
                 first_write = False
-
+            
             sap_model = None
 
     sap_close(sap_object)
