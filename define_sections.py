@@ -127,7 +127,6 @@ def create_section_combinations():
     # [top, bottom, web]
     box_box_box = valid_combinations(top_chord_box, bottom_chord_box, web_box)
     box_box_round = valid_combinations(top_chord_box, bottom_chord_box, web_round)   
-
     return [box_box_box, box_box_round]
 
 def write_to_excel(results, path, sheet, first_write=False):

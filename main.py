@@ -19,6 +19,9 @@ if __name__ == '__main__':
     assert num_spans % 2 != 0
     num_modules = 2*num_spans
     span_length = 2*module_length
+    total_length = span_length * num_spans
+    barrier_height = 1.1
+    barrier_section = 'Barrier'
 
     ''' ------------------------ DEFINE LOADS ------------------------ '''
 
@@ -103,15 +106,20 @@ if __name__ == '__main__':
             # set the releases for moment splice between modules
             sap_set_releases(sap_model, vertical_web_frames, bottom_chord_frames, top_chord_frames, 
                             diagonal_web_frames, num_modules, module_divisions)
+            
+            # brace bottom chord at the midpoint of each frame to the left and right of the support
+            # this is to prevent those members from failing the kl/r_y check
+            sap_brace_bottom_chord(sap_model, bottom_chord_frames, num_spans, module_divisions)
+            
+            # create barrier and apply vertical and horizontal barrier load patterns (cases created in sap_set_loads)
+            sap_barrier_load(sap_model, total_length, barrier_height, barrier_section, barrier_UDL)
 
             # set the load case, apply deck load to bottom chord
             sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
-                        wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL, barrier_UDL,
+                        wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL,
                         wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL)
-            
-            ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------
-            
-            ------ '''
+                                    
+            ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------------ '''
             
             # save the file to a new file in the models folder (so don't override the BASE file)
             sap_run_analysis(sap_model, model_path)
@@ -153,6 +161,7 @@ if __name__ == '__main__':
             tqdm.write(f'Resonating harmonic of span occupied: {round(resonating_harmonic_occupied, 4)}')
             tqdm.write(f'Passed steel design check for ULS: {passed}')
             tqdm.write(f'Failed section: {failed_section_names}')
+
             # write result to excel
             if combo_index % 10 == 0:
                 write_to_excel(results, results_path, sheet_name, first_write)

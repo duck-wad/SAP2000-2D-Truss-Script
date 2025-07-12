@@ -33,7 +33,7 @@ def sap_create_frame(sap_model, bottom_chord_points, top_chord_points, diagonal_
 
     for i in range(len(bottom_chord_points)-1):
         bottom_chord_frames.append(sap_model.FrameObj.AddByCoord(*bottom_chord_points[i], 
-                                                                 *bottom_chord_points[i+1], 'foo', bottom_chord_section)[0])
+                                                                 *bottom_chord_points[i+1], 'foo', bottom_chord_section)[0])   
     # generate top chord
     for i in range(len(top_chord_points)-1):
         top_chord_frames.append(sap_model.FrameObj.AddByCoord(*top_chord_points[i], 
@@ -111,6 +111,34 @@ def sap_set_releases(sap_model, vertical_web_frames, bottom_chord_frames, top_ch
         ret = sap_model.FrameObj.SetReleases(diagonal_web_frames[module_divisions*2-1+i*2*module_divisions], no_release, 
                                              moment_release, startval, endval)
         
+def sap_brace_bottom_chord(sap_model, bottom_chord_frames, num_spans, num_divisions):
+
+    # loop over the bottom chord, and locate the frames to the left and right of the supports
+    # get the location of their nodes, get the midpoint and add a point
+    for i in range(num_spans):
+        left_frame = bottom_chord_frames[i * num_divisions * 2]
+        right_frame = bottom_chord_frames[(i * num_divisions * 2) + (num_divisions * 2 - 1)]
+        
+        frames = [left_frame, right_frame]
+        points = []
+        for frame in frames:
+            # brace left at middle of frame by creating special joint
+            point_1 = ''
+            point_2 = ''
+            point_1, point_2, ret = sap_model.FrameObj.GetPoints(frame)
+
+            x_1, _, _, ret = sap_model.PointObj.GetCoordCartesian(point_1)
+            x_2, _, _, ret = sap_model.PointObj.GetCoordCartesian(point_2)
+
+            mid = (x_1 + x_2) / 2.
+
+            points.append(sap_model.PointObj.AddCartesian(mid, 0, 0)[0])
+
+        # set the restraint in the y-direction to the midpoints
+        y_translation_restraint = [False, True, False, False, False, False]
+        for point in points:
+            ret = sap_model.PointObj.SetRestraint(point, y_translation_restraint)
+
 def sap_central_node(sap_model, bottom_chord_frames):
     # get the displacement of node in center of of the middlemost span (need num_spans to be odd)
     # bottom_chord_frames has even number of frames. the frame with its right node at the point we want
@@ -122,15 +150,36 @@ def sap_central_node(sap_model, bottom_chord_frames):
     point_1, point_2, ret = sap_model.FrameObj.GetPoints(target, point_1, point_2)
     return point_1
 
+def sap_barrier_load(sap_model, length, barrier_height, barrier_section, barrier_UDL):
+
+    start = (0,0,barrier_height)
+    end = (length,0,barrier_height)
+
+    # barrier section is massless
+    barrier = sap_model.FrameObj.AddByCoord(*start, *end, 'foo', barrier_section)[0]
+
+    # add the barrier load pattern (not the case)
+    ret = sap_model.LoadPatterns.Add('BARRIER_VERTICAL', 3, 0, True)
+    ret = sap_model.LoadPatterns.Add('BARRIER_HORIZONTAL', 3, 0, True)
+
+    ret = sap_model.FrameObj.SetLoadDistributed(barrier, 'BARRIER_VERTICAL', 1, 10, 0, 1, 
+                                                barrier_UDL, barrier_UDL, RelDist = True)
+    # horizontal load is dir y (5)
+    ret = sap_model.FrameObj.SetLoadDistributed(barrier, 'BARRIER_HORIZONTAL', 1, 5, 0, 1, 
+                                                barrier_UDL, barrier_UDL, RelDist = True)
+    
+    # divide frames at the intersections, to divide the barrier at the intersections w/ the webs
+    # form rigid connection
+    ret = sap_model.SelectObj.All()
+    ret = sap_model.EditFrame.DivideAtIntersections(barrier, 0, [])
+
 def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
-                  wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL, 
-                  barrier_UDL, wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL):
+                  wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL,
+                  wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL):
     # define the load patterns (ULS and SLS)
     # (case name, type (1=dead, 3=live, 8=other), self weight multiplier, add linear static load case)
     ret = sap_model.LoadPatterns.Add('DEAD', 1, 1, True)
     ret = sap_model.LoadPatterns.Add('LIVE', 3, 0, True)
-    ret = sap_model.LoadPatterns.Add('BARRIER_VERTICAL', 3, 0, True)
-    ret = sap_model.LoadPatterns.Add('BARRIER_HORIZONTAL', 3, 0, True)
     ret = sap_model.LoadPatterns.Add('DECK', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('WEARING SURFACE', 8, 0, True)
     ret = sap_model.LoadPatterns.Add('SNOW', 8, 0, True)
@@ -142,11 +191,6 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
         # integer indicating direction (10 is gravity dir), dist1, dist2, val1, val2)
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'LIVE', 1, 10, 0, 1, 
                                                     live_UDL, live_UDL, RelDist = True)
-        ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'BARRIER_VERTICAL', 1, 10, 0, 1, 
-                                                    barrier_UDL, barrier_UDL, RelDist = True)
-        # horizontal load is dir y (5)
-        ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'BARRIER_HORIZONTAL', 1, 5, 0, 1, 
-                                                    barrier_UDL, barrier_UDL, RelDist = True)
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'DECK', 1, 10, 0, 1, 
                                                     concrete_deck_UDL, concrete_deck_UDL, RelDist = True)
         ret = sap_model.FrameObj.SetLoadDistributed(bottom_chord_frames[i], 'WEARING SURFACE', 1, 10, 0, 1, 
@@ -167,7 +211,6 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
         [dead_factor, live_factor, live_factor, live_factor, 
          concrete_deck_factor, wearing_surface_factor, dead_factor, snow_factor])
 
-    
     # for SLS its no snow, just 1.0 factors
     ret = sap_model.LoadCases.StaticLinear.SetCase('SLS')
     ret = sap_model.LoadCases.StaticLinear.SetLoads(
@@ -177,7 +220,7 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
 
     # for modal analysis, increase the number of modes (eigen) to 40
     ret = sap_model.LoadCases.ModalEigen.SetNumberModes('MODAL', 40, 20)
-    
+
 def sap_run_analysis(sap_model, file_path):
     ret = sap_model.File.Save(file_path)
     ret = sap_model.Analyze.RunAnalysis()
