@@ -171,7 +171,8 @@ def sap_barrier_load(sap_model, length, barrier_height, barrier_section, barrier
     # divide frames at the intersections, to divide the barrier at the intersections w/ the webs
     # form rigid connection
     ret = sap_model.SelectObj.All()
-    ret = sap_model.EditFrame.DivideAtIntersections(barrier, 0, [])
+    _, barriers, ret = sap_model.EditFrame.DivideAtIntersections(barrier, 0, [])
+    return list(barriers)
 
 def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
                   wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL,
@@ -221,6 +222,61 @@ def sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor,
     # for modal analysis, increase the number of modes (eigen) to 40
     ret = sap_model.LoadCases.ModalEigen.SetNumberModes('MODAL', 40, 20)
 
+def sap_gerber_modification(sap_model, vertical_web_frames, top_chord_frames, barrier_frames, 
+                            num_spans, module_divisions):
+
+    # track which frames that are deleted and remove from the list of frames
+    web_deleted = []
+    top_deleted = []
+
+    # delete the vertical webs at the supports. These are every other entry to vertical_web_frames
+    for index, frame in enumerate(vertical_web_frames):
+        if index %  2 == 0:
+            ret = sap_model.FrameObj.Delete(frame)
+            web_deleted.append(frame)
+
+    # delete the top chords to the left and right of the deleted vertical webs
+    for i in range(num_spans):
+        # if bottom chord is divided into module_divisions, top is divided into (module_divisions + 1)
+        left_index = i * (module_divisions + 1) * 2
+        right_index = left_index + (module_divisions + 1) * 2 - 1
+        left_frame = top_chord_frames[left_index]
+        right_frame = top_chord_frames[right_index]
+
+        top_deleted.append(left_frame)
+        top_deleted.append(right_frame)
+
+        # deleting the vertical webs at the supports deletes the y-bracing. so need to rebrace at the 
+        # corners of top chord of each gerber span
+        # rebrace before deleting the top chord frames
+        point_1 = ''
+        point_2 = ''
+        y_translation_restraint = [False, True, False, False, False, False]
+        point_1, point_2, ret = sap_model.FrameObj.GetPoints(left_frame, point_1, point_2)
+        # for the left frame we are about to delete, we want to brace the point_2 (right node)
+        ret = sap_model.PointObj.SetRestraint(point_2, y_translation_restraint)
+        point_1, point_2, ret = sap_model.FrameObj.GetPoints(right_frame, point_1, point_2)
+        # for the right frame brace the point_1 (left node)
+        ret = sap_model.PointObj.SetRestraint(point_1, y_translation_restraint)
+        
+        ret = sap_model.FrameObj.Delete(left_frame)
+        ret = sap_model.FrameObj.Delete(right_frame)
+
+    # delete the outermost barrier frame
+    ret = sap_model.FrameObj.Delete(barrier_frames[0])
+    ret = sap_model.FrameObj.Delete(barrier_frames[-1])
+
+    # remove the deleted frames from their respective lists
+    for web in web_deleted:
+        vertical_web_frames.remove(web)
+    for top in top_deleted:
+        top_chord_frames.remove(top)
+    del barrier_frames[0]
+    del barrier_frames[-1]
+
+    # return the modified lists of frames
+    return vertical_web_frames, top_chord_frames, barrier_frames
+
 def sap_run_analysis(sap_model, file_path):
     ret = sap_model.File.Save(file_path)
     ret = sap_model.Analyze.RunAnalysis()
@@ -257,7 +313,7 @@ def sap_module_mass(sap_model, num_modules):
     
     return module_mass
 
-def sap_natural_frequency(sap_model, pedestrian_density, concrete_deck_UDL, live_UDL):
+def sap_vibration_analysis(sap_model, pedestrian_density, concrete_deck_UDL, live_UDL, damping_ratio):
     # get results from 'MODAL' load case
     ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
     ret = sap_model.Results.Setup.SetCaseSelectedForOutput('MODAL')
@@ -293,6 +349,33 @@ def sap_natural_frequency(sap_model, pedestrian_density, concrete_deck_UDL, live
     # calculate resonating harmonic
     m_empty = natural_frequency / forcing_frequency
     m_occupied = natural_frequency_occupied / forcing_frequency
+
+    # if either of the resonating harmonics are below 5, further analysis is required
+    """ if m_empty < 5. or m_occupied < 5.:
+        m_crit = min(m_empty, m_occupied)
+        m = round(m_crit)
+        frequency = min(natural_frequency, natural_frequency_occupied)
+        period = 1. / frequency
+
+        alphas = [0.4, 0.1, 0.042, 0.041, 0.027]
+        alpha = alphas[m-1]
+        pedestrian_weight = 700. # N
+
+        # dummy variables because idk what these are
+        N = 1
+        S = 1
+        if pedestrian_density < 1.:
+            n_eq = 10.8 * math.sqrt(damping_ratio * N) / S
+        else:
+            n_eq = 1.85 * math.sqrt(N) / S
+
+        amplitude = n_eq * pedestrian_weight * alpha
+
+        # create a cosine time history function
+        ret = sap_model.Func.FuncTH.SetCosine('HARMONIC LOAD', period, 20, 10, amplitude)
+        
+        # create load pattern 
+        ret = sap_model.LoadPatterns.Add('VIBRATION', 8, 0, True) """
 
     return natural_frequency, in_crit_range, natural_frequency_occupied, m_empty, m_occupied
 

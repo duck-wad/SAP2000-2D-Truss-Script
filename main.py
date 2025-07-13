@@ -9,9 +9,9 @@ if __name__ == '__main__':
 
     ''' ------------------------ DEFINE MODEL PARAMETERS ------------------------ '''
 
-    height = 2.5
+    height = 3.0
     module_length = 15.0
-    module_divisions = 4 # applies to the bottom chord
+    module_divisions = 3 # applies to the bottom chord
     segment_length = module_length / module_divisions
     # each span contains 2 modules, so there will be num_spans x 2 modules
     # num_spans should be an odd number
@@ -20,8 +20,12 @@ if __name__ == '__main__':
     num_modules = 2*num_spans
     span_length = 2*module_length
     total_length = span_length * num_spans
-    barrier_height = 1.1
+    barrier_height = 1.37
     barrier_section = 'Barrier'
+    damping_ratio = 0.003
+
+    # default analysis is for through truss design. for gerber design, set is_gerber to true
+    is_gerber = True
 
     ''' ------------------------ DEFINE LOADS ------------------------ '''
 
@@ -112,15 +116,19 @@ if __name__ == '__main__':
             sap_brace_bottom_chord(sap_model, bottom_chord_frames, num_spans, module_divisions)
             
             # create barrier and apply vertical and horizontal barrier load patterns (cases created in sap_set_loads)
-            sap_barrier_load(sap_model, total_length, barrier_height, barrier_section, barrier_UDL)
+            barrier_frames = sap_barrier_load(sap_model, total_length, barrier_height, barrier_section, barrier_UDL)
 
             # set the load case, apply deck load to bottom chord
             sap_set_loads(sap_model, bottom_chord_frames, top_chord_frames, dead_factor, live_factor, 
                         wearing_surface_factor, concrete_deck_factor, snow_factor, live_UDL,
                         wearing_surface_UDL, concrete_deck_UDL, snow_UDL, roof_UDL)
+            
+            if is_gerber:
+                vertical_web_frames, top_chord_frames, barrier_frames = sap_gerber_modification(
+                    sap_model, vertical_web_frames, top_chord_frames, barrier_frames, num_spans, module_divisions)
                                     
             ''' ------------------------ RUN MODEL AND COLLECT RESULTS ------------------------ '''
-            
+
             # save the file to a new file in the models folder (so don't override the BASE file)
             sap_run_analysis(sap_model, model_path)
 
@@ -128,8 +136,8 @@ if __name__ == '__main__':
             # get the reaction output from dead case and divide by num_modules
             module_mass = sap_module_mass(sap_model, num_modules)
 
-            natural_frequency, in_crit_range, natural_frequency_occupied, resonating_harmonic, resonating_harmonic_occupied = sap_natural_frequency(
-                sap_model, pedestrian_density, concrete_deck_UDL, live_UDL)
+            natural_frequency, in_crit_range, natural_frequency_occupied, resonating_harmonic, resonating_harmonic_occupied = sap_vibration_analysis(
+                sap_model, pedestrian_density, concrete_deck_UDL, live_UDL, damping_ratio)
             # verify frames pass steel design check, and get list of sections that fail if ULS does not pass
             passed, failed_section_names = sap_steel_design(sap_model)
 
