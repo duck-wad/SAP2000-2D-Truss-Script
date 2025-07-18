@@ -25,7 +25,7 @@ if __name__ == '__main__':
     damping_ratio = 0.003
 
     # default analysis is for through truss design. for gerber design, set is_gerber to true
-    is_gerber = True
+    is_gerber = False
 
     ''' ------------------------ DEFINE LOADS ------------------------ '''
 

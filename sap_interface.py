@@ -379,6 +379,8 @@ def sap_vibration_analysis(sap_model, pedestrian_density, concrete_deck_UDL, liv
 
     return natural_frequency, in_crit_range, natural_frequency_occupied, m_empty, m_occupied
 
+    
+
 def sap_steel_design(sap_model):
 
     ret = sap_model.Results.Setup.DeselectAllCasesAndCombosForOutput()
