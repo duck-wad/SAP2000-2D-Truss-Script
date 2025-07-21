@@ -15,7 +15,7 @@ def plot_save(plt, out_path, section, name):
 
 
 def get_uls_indices(df):
-    uls_result = df["Passed steel design check for ULS"].to_numpy()
+    uls_result = df["Passed member design check for ULS"].to_numpy()
     index_true = np.where(uls_result)[0]
     index_false = np.where(~uls_result)[0]
     return index_true, index_false
@@ -39,9 +39,17 @@ def determine_optimal_section(mass, harmonic, deflection):
     )
 
     # assign equal weighting to mass and harmonic
-    mass_weighting = 2.0 / 4.0
-    harmonic_weighting = 1.0 / 4.0
-    deflection_weighting = 1.0 / 4.0
+    cost_matrix_weighting = 0.35
+    serviceability_matrix_weighting = 0.1
+    mass_weighting = cost_matrix_weighting / (
+        cost_matrix_weighting + serviceability_matrix_weighting
+    )
+    harmonic_weighting = (serviceability_matrix_weighting / 2.0) / (
+        cost_matrix_weighting + serviceability_matrix_weighting
+    )
+    deflection_weighting = (serviceability_matrix_weighting / 2.0) / (
+        cost_matrix_weighting + serviceability_matrix_weighting
+    )
     score = (
         mass_weighting * normalized_mass
         + harmonic_weighting * normalized_harmonic
@@ -88,7 +96,6 @@ def plot_mass_vs_deflection(
     )
     plt.ylabel("SLS Deflection [mm]")
     plt.xlabel("Mass of module [kg]")
-    plt.title(f'Module mass vs SLS deflection for "{sheet_name}" sections')
     plt.grid(True)
     plt.minorticks_on()
     plt.legend()
@@ -132,18 +139,15 @@ def plot_mass_vs_harmonic(
         color="cyan",
         s=20,
     )
-    plt.ylabel("Occupied resonating harmonic")
+    plt.ylabel("Resonating harmonic")
     plt.xlabel("Mass of module [kg]")
-    plt.title(
-        f'Module mass vs occupied resonating harmonic for "{sheet_name}" sections'
-    )
     plt.grid(True)
     plt.minorticks_on()
     plt.legend()
     plt.annotate(
         optimal_sections,
         xy=(optimal_mass, optimal_harmonic),
-        xytext=(optimal_mass + 400, optimal_harmonic - 0.7),
+        xytext=(optimal_mass + 400, optimal_harmonic - 0.2),
         arrowprops=dict(facecolor="cyan", arrowstyle="->"),
         fontsize=9,
         bbox=dict(
@@ -151,7 +155,7 @@ def plot_mass_vs_harmonic(
         ),
     )
 
-    plot_save(plt, out_path, sheet_name, "mass vs occupied resonating harmonic")
+    plot_save(plt, out_path, sheet_name, "mass vs resonating harmonic")
 
 
 # interpret_results can be run from main.py, or just from the run() function in this file
@@ -198,14 +202,6 @@ def interpret_results(file_path, sheets, folderpath):
         optimal_top_chord = top_chord_uls_passed[high_score_index]
         optimal_bottom_chord = bottom_chord_uls_passed[high_score_index]
         optimal_web = web_uls_passed[high_score_index]
-        optimal_sections = (
-            "Top: "
-            + optimal_top_chord
-            + ", Bottom: "
-            + optimal_bottom_chord
-            + ", Web: "
-            + optimal_web
-        )
         # with line breaks for plotting
         optimal_sections_spaced = (
             "Top: "
@@ -243,7 +239,8 @@ def interpret_results(file_path, sheets, folderpath):
 def run():
     root_path = os.getcwd()
     file_path = root_path + "/output.xlsx"
-    sheet_names = ["Box Box Box", "Box Box Round"]
+    sheet_names = ["Aluminum"]
+    # sheet_names = ["Steel"]
     interpret_results(file_path, sheet_names, root_path)
 
 
